@@ -1,19 +1,43 @@
 -- Project Loot
 
-local frame = CreateFrame("FRAME", "ProjectLootFrame");
-local loot = {};
-events = {};
-copper = nil;
+local P = {}
+projectLoot = P
+local _G = _G
 
-local function plLog(msg, ...)
+-- imports
+local pairs = pairs
+local print = print
+local string = string
+local table = table
+local time = time
+local unpack = unpack
+
+local CreateFrame = CreateFrame
+local GetMoney = GetMoney
+local GetNumLootItems = GetNumLootItems
+local GetLootSlotInfo = GetLootSlotInfo
+local GetLootSlotLink = GetLootSlotLink
+local UnitLevel = UnitLevel
+local UnitXP = UnitXP
+
+setfenv(1, P)
+
+loot = {}
+events = _G.projectLootEvents
+
+function track(name, ...)
+   table.insert(events, {time(), name, unpack({...})})
+end
+ 
+function log(msg, ...)
    print("PL: " .. msg .. ":", ...);
 end
 
-local function plLogEvent(self, event, ...)
-   plLog("(" .. event .. ")", ...);
+function logEvent(self, event, ...)
+   log("(" .. event .. ")", ...);
 end
 
-local function plLootSlotOpened(self, event, ...)
+function lootSlotOpened(self, event, ...)
    local icon, name, qty, rarity, locked, link, itemId;
 
    for slot=1, GetNumLootItems() do
@@ -29,69 +53,87 @@ local function plLootSlotOpened(self, event, ...)
    end
 end
 
-local function plLootSlotCleared(self, event, slot)
+function lootSlotCleared(self, event, slot)
    local time = time();
 
-   plLog("looted", time, loot[slot]);
+   log("looted", time, loot[slot]);
 end
 
-local function plLogThenHandle(handler)
+function logThenHandle(handler)
    return function (self, event, ...)
-      plLogEvent(self, event, ...);
+      logEvent(self, event, ...);
       handler(self, event, ...);
    end
 end
 
-local function plPlayerSnapshot(eventName)
-   local copper, level, xp = GetMoney(), UnitLevel("player"), UnitXP("player");
-
-   table.insert(events, {eventName, time(), copper, level, xp})
+function playerSnapshot(eventName)
+   track(eventName, GetMoney(), UnitLevel("player"), UnitXP("player"))
+   --table.insert(events, {eventName, time(), copper, level, xp})
 end
 
-local function plPlayerLogin(self, event)
+function playerLogin(self, event)
    copper = GetMoney();
-   plPlayerSnapshot("PLAYER_LOGIN");
+   playerSnapshot("PLAYER_LOGIN");
 end
 
-local function plPlayerLogout(self, event)
-   plPlayerSnapshot("PLAYER_LOGOUT");
+function flushEvents()
+   _G.projectLootEvents = events
 end
 
-local function plPlayerMoney(self, event)
+function playerLogout(self, event)
+   playerSnapshot("PLAYER_LOGOUT");
+   flushEvents()
+end
+
+function playerMoney(self, event)
    local copperNow = GetMoney();
 
    table.insert(events, {"COPPER_CHANGE", time(), copperNow - copper});
    copper = copperNow;
 end
 
-local function plPlayerLevelUp(self, event, level, ...)
+function playerLevelUp(self, event, level, ...)
    table.insert(events, {"LEVEL_UP", time(), level});
 end
 
-local function plPlayerDead(self, event)
+function playerDead(self, event)
    table.insert(events, {"PLAYER_DEAD", time()});
 end
 
-local handlers = {
-   -- ["CHAT_MSG_MONEY"] = plLogEvent, -- an actual string message
-   ["ITEM_PUSH"] = plLogEvent, -- doesn't fire on anything too useful?
-   ["LOOT_OPENED"] = plLogThenHandle(plLootSlotOpened),
-   ["LOOT_SLOT_CLEARED"] = plLogThenHandle(plLootSlotCleared),
-   ["LOOT_SLOT_CHANGED"] = plLogEvent,
-   ["OPEN_MASTER_LOOT_LIST"] = plLogEvent,
-   ["PLAYER_DEAD"] = plPlayerDead,
-   ["PLAYER_LEVEL_UP"] = plPlayerLevelUp,
-   ["PLAYER_LOGIN"] = plPlayerLogin,
-   ["PLAYER_LOGOUT"] = plPlayerLogout,
-   ["PLAYER_MONEY"] = plPlayerMoney,
-   ["UPDATE_MASTER_LOOT_LIST"] = plLogEvent,
-};
-
-local function plEventDispatch(self, event, ...)
+function eventDispatch(self, event, ...)
    handlers[event](self, event, ...);
 end
 
-for k,v in pairs(handlers) do
+function addonLoaded(self, event, addonName)
+   if addonName == "ProjectLoot" then
+      -- Our variables, if they exist, have been loaded at this point
+      if nil == _G.projectLootEvents then
+         events = {}
+      else
+         events = _G.projectLootEvents
+      end
+   end
+end
+
+
+handlers = {
+   -- ["CHAT_MSG_MONEY"] = LogEvent, -- an actual string message
+   ["ADDON_LOADED"] = addonLoaded,
+   ["ITEM_PUSH"] = logEvent, -- doesn't fire on anything too useful?
+   ["LOOT_OPENED"] = logThenHandle(LootSlotOpened),
+   ["LOOT_SLOT_CLEARED"] = logThenHandle(LootSlotCleared),
+   ["LOOT_SLOT_CHANGED"] = logEvent,
+   ["OPEN_MASTER_LOOT_LIST"] = logEvent,
+   ["PLAYER_DEAD"] = playerDead,
+   ["PLAYER_LEVEL_UP"] = playerLevelUp,
+   ["PLAYER_LOGIN"] = playerLogin,
+   ["PLAYER_LOGOUT"] = playerLogout,
+   ["PLAYER_MONEY"] = playerMoney,
+   ["UPDATE_MASTER_LOOT_LIST"] = logEvent,
+};
+
+frame = CreateFrame("FRAME", "ProjectLootFrame")
+for k, v in pairs(handlers) do
    frame:RegisterEvent(k);
 end
-frame:SetScript("OnEvent", plEventDispatch);
+frame:SetScript("OnEvent", eventDispatch);
