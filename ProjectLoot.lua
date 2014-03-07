@@ -68,7 +68,6 @@ end
 
 function playerSnapshot(eventName)
    track(eventName, GetMoney(), UnitLevel("player"), UnitXP("player"))
-   --table.insert(events, {eventName, time(), copper, level, xp})
 end
 
 function playerLogin(self, event)
@@ -88,16 +87,16 @@ end
 function playerMoney(self, event)
    local copperNow = GetMoney();
 
-   table.insert(events, {"COPPER_CHANGE", time(), copperNow - copper});
+   track("COPPER_CHANGE", copperNow - copper);
    copper = copperNow;
 end
 
 function playerLevelUp(self, event, level, ...)
-   table.insert(events, {"LEVEL_UP", time(), level});
+   track("LEVEL_UP", level);
 end
 
 function playerDead(self, event)
-   table.insert(events, {"PLAYER_DEAD", time()});
+   track("PLAYER_DEAD");
 end
 
 function eventDispatch(self, event, ...)
@@ -120,8 +119,8 @@ handlers = {
    -- ["CHAT_MSG_MONEY"] = LogEvent, -- an actual string message
    ["ADDON_LOADED"] = addonLoaded,
    ["ITEM_PUSH"] = logEvent, -- doesn't fire on anything too useful?
-   ["LOOT_OPENED"] = logThenHandle(LootSlotOpened),
-   ["LOOT_SLOT_CLEARED"] = logThenHandle(LootSlotCleared),
+   ["LOOT_OPENED"] = logThenHandle(lootSlotOpened),
+   ["LOOT_SLOT_CLEARED"] = logThenHandle(lootSlotCleared),
    ["LOOT_SLOT_CHANGED"] = logEvent,
    ["OPEN_MASTER_LOOT_LIST"] = logEvent,
    ["PLAYER_DEAD"] = playerDead,
