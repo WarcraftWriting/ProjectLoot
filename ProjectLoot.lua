@@ -1,9 +1,9 @@
 -- Project Loot
 
 local frame = CreateFrame("FRAME", "ProjectLootFrame");
-local playerName = UnitName("player");
-local realm = GetRealmName();
 local loot = {};
+events = {};
+copper = nil;
 
 local function plLog(msg, ...)
    print("PL: " .. msg .. ":", ...);
@@ -30,9 +30,9 @@ local function plLootSlotOpened(self, event, ...)
 end
 
 local function plLootSlotCleared(self, event, slot)
-   local time, playerName = time(), UnitName("player");
+   local time = time();
 
-   plLog("looted", time, realm, playerName, loot[slot]);
+   plLog("looted", time, loot[slot]);
 end
 
 local function plLogThenHandle(handler)
@@ -42,11 +42,34 @@ local function plLogThenHandle(handler)
    end
 end
 
-local function plPlayerEnteringWorld(self, event)
+local function plPlayerSnapshot(eventName)
    local copper, level, xp = GetMoney(), UnitLevel("player"), UnitXP("player");
 
-   plLog("foo", 1, 2, 3);
-   plLog("session start", time(), realm, UnitName("player"), copper, level, xp);
+   table.insert(events, {eventName, time(), copper, level, xp})
+end
+
+local function plPlayerLogin(self, event)
+   copper = GetMoney();
+   plPlayerSnapshot("PLAYER_LOGIN");
+end
+
+local function plPlayerLogout(self, event)
+   plPlayerSnapshot("PLAYER_LOGOUT");
+end
+
+local function plPlayerMoney(self, event)
+   local copperNow = GetMoney();
+
+   table.insert(events, {"COPPER_CHANGE", time(), copperNow - copper});
+   copper = copperNow;
+end
+
+local function plPlayerLevelUp(self, event, level, ...)
+   table.insert(events, {"LEVEL_UP", time(), level});
+end
+
+local function plPlayerDead(self, event)
+   table.insert(events, {"PLAYER_DEAD", time()});
 end
 
 local handlers = {
@@ -56,7 +79,11 @@ local handlers = {
    ["LOOT_SLOT_CLEARED"] = plLogThenHandle(plLootSlotCleared),
    ["LOOT_SLOT_CHANGED"] = plLogEvent,
    ["OPEN_MASTER_LOOT_LIST"] = plLogEvent,
-   ["PLAYER_ENTERING_WORLD"] = plPlayerEnteringWorld,
+   ["PLAYER_DEAD"] = plPlayerDead,
+   ["PLAYER_LEVEL_UP"] = plPlayerLevelUp,
+   ["PLAYER_LOGIN"] = plPlayerLogin,
+   ["PLAYER_LOGOUT"] = plPlayerLogout,
+   ["PLAYER_MONEY"] = plPlayerMoney,
    ["UPDATE_MASTER_LOOT_LIST"] = plLogEvent,
 };
 

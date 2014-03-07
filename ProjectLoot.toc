@@ -2,6 +2,9 @@
 ## Title: Project Loot
 ## Notes: Project Loot tracking add-on. This is alpha software, use at your own risk.
 ## Version: 0.0.1
+## SavedVariablesPerCharacter: events
 ## Author: Warcraft Writing
+## DefaultState: Enabled
+## LoadOnDemand: 0
 
 ProjectLoot.lua
