@@ -5,65 +5,38 @@ local playerName = UnitName("player");
 local realm = GetRealmName();
 local loot = {};
 
-local function plLogEvent(self, event, ...)
-   local k, v;
+local function plLog(self, msg, ...)
+   print("PL: " .. msg .. " [", ..., "]");
+end
 
-   print("Project Loot: (" .. event .. ")");
-   -- can I use for i,v in ipairs(...) do?
-   for k=1, select("#", ...) do
-      v = select(k, ...)
-      if v then
-         print("  [" .. v .. "]");
-      end
-   end
+local function plLogEvent(self, event, ...)
+   plLog(self, "(" .. event .. ")", ...);
 end
 
 local function plLootSlotOpened(self, event, ...)
-   for i=1,GetNumLootItems() do
-      local icon, name, qty, rarity, locked = GetLootSlotInfo(i);
-      local link = GetLootSlotLink(i);
-      local now = time();
+   local icon, name, qty, rarity, locked, link, itemId;
+
+   for slot=1, GetNumLootItems() do
+      link = GetLootSlotLink(slot);
 
       if link then
-         local itemId = string.match(link, "item:(%d+)");
-         print("itemId: " .. itemId);
-
-         loot[i] = {now, realm, playerName, itemId};
-         --print("Loot: " .. qty .. " x " .. name);
+         itemId = string.match(link, "item:(%d+)");
+         loot[slot] = itemId;
       else
-         print("no link for slot: " .. i);
+         icon, name, qty, rarity, locked = GetLootSlotInfo(slot);
+         loot[slot] = name
       end
    end
 end
 
+-- try self, event, slot, ...
 local function plLootSlotCleared(self, event, ...)
-   local time = time();
    local slot = select(1, ...);
-   print("looting slot: ", slot);
-   --print("raw: " .. loot[slot][4]);
 
-   -- local icon, name, qty, rarity, locked = GetLootSlotInfo(slot);
-   -- local link = GetLootSlotLink(slot);
-   -- if link then
-   --    local itemId = string.match(link, "item:(%d+)");
-   --    print("itemId [cleared]: " .. itemId);
-   -- else
-   --    print("no link found for: " .. slot);
-   -- end
-
-   -- TODO: try this:
-   -- t, r, pn, id = unpack(loot[slot]);
-   -- http://www.lua.org/manual/5.1/manual.html#pdf-unpack
-   local t = loot[slot][1];
-   local r = loot[slot][2];
-   local pn = loot[slot][3];
-   local itemId = loot[slot][4];
-
-   print("raw", t, r, pn, itemId);
-   if itemId then
-      print("looted: " .. t .. "," .. r .. "," .. pn .. "," .. itemId);
+   if loot[slot] then
+      print("looted: " .. time() .. "," .. realm .. "," .. UnitName("player") .. "," .. loot[slot]);
    else
-      print("looted: " .. t .. "," .. r .. "," .. pn .. "," .. "<unknown>");
+      print("looted: " .. time() .. "," .. realm .. "," .. UnitName("player") .. "," .. "<unknown>");
    end
 end
 
