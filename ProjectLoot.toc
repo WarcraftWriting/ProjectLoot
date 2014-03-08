@@ -7,4 +7,6 @@
 ## DefaultState: Enabled
 ## LoadOnDemand: 0
 
+Stack.lua
+
 ProjectLoot.lua

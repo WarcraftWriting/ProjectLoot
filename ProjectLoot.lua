@@ -20,12 +20,16 @@ local GetLootSlotLink = GetLootSlotLink
 local UnitLevel = UnitLevel
 local UnitXP = UnitXP
 
+local Stack = Stack
+
 setfenv(1, P)
 
 loot = {}
-events = _G.projectLootEvents
+stack = Stack.new()
 
 function track(name, ...)
+   local events = Stack.peek(stack)
+
    table.insert(events, {time(), name, unpack({...})})
 end
  
@@ -76,7 +80,7 @@ function playerLogin(self, event)
 end
 
 function flushEvents()
-   _G.projectLootEvents = events
+   _G.projectLootEvents = Stack.pop(stack) -- this should always == stack[1]
 end
 
 function playerLogout(self, event)
@@ -111,6 +115,34 @@ function addonLoaded(self, event, addonName)
       else
          events = _G.projectLootEvents
       end
+      Stack.push(stack, events)
+   end
+end
+
+function questComplete(self, event)
+   print("TODO")
+   --Stack.push(stack, {})
+end
+
+function questFinished(self, event)
+   print("TODO")
+   --track("QUEST_FINISHED", Stack.pop(stack))
+end
+
+function merchantShow(self, event, ...)
+   Stack.push(stack, {})
+end
+
+merchantClosedCount = 0
+
+function merchantClosed(self, event, ...)
+   if 0 < merchantClosedCount then
+      merchantClosedCount = 0
+   else
+      local s = Stack.pop(stack)
+
+      merchantClosedCount = merchantClosedCount + 1
+      track("MERCHANT_CLOSED", s)
    end
 end
 
@@ -129,6 +161,20 @@ handlers = {
    ["PLAYER_LOGOUT"] = playerLogout,
    ["PLAYER_MONEY"] = playerMoney,
    ["UPDATE_MASTER_LOOT_LIST"] = logEvent,
+   --
+   --
+   --
+   ["MERCHANT_CLOSED"] = logThenHandle(merchantClosed), -- fires twice
+   ["MERCHANT_SHOW"] = logThenHandle(merchantShow),
+   ["QUEST_COMPLETE"] = logThenHandle(questComplete), -- this is the opening salvo for a quest
+   ["QUEST_FINISHED"] = logThenHandle(questFinished),
+   ["QUEST_GREETING"] = logEvent, -- fired for givers with > 1 quest
+   -- TAXIMAP_OPENED
+   -- BANKFRAME_OPENED
+   -- TRAINER_SHOW
+   -- TRADE_SKILL_SHOW
+   -- DELETE_ITEM_CONFIRM
+   -- MERCHANT_SHOW -- wowwiki misc events page
 };
 
 frame = CreateFrame("FRAME", "ProjectLootFrame")
