@@ -3,6 +3,7 @@
 local P = {}
 projectLoot = P
 local _G = _G
+SLASH_PROJECT_LOOT1, SLASH_PROJECT_LOOT2 = "/pl", "/projectloot"
 
 -- imports
 local pairs = pairs
@@ -19,6 +20,7 @@ local GetLootSlotInfo = GetLootSlotInfo
 local GetLootSlotLink = GetLootSlotLink
 local GetMoney = GetMoney
 local GetNumLootItems = GetNumLootItems
+local SlashCmdList = SlashCmdList
 local UnitLevel = UnitLevel
 local UnitXP = UnitXP
 
@@ -268,6 +270,17 @@ for k, v in pairs(handlers) do
 end
 frame:SetScript("OnEvent", eventDispatch);
 
+SlashCmdList.PROJECT_LOOT = function (msg, editBox)
+   if "" == msg then
+      print("Available Project Loot commands:")
+      print("    clear -- clears all current events")
+   elseif "clear" == msg then
+      events = {}
+      log("Events cleared.")
+   else
+      log("Unrecognized command", msg)
+   end
+end
 
 -- item sale:
 -- merchant_open
