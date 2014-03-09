@@ -73,7 +73,11 @@ function track(name, ...)
 end
 
 function log(msg, ...)
-   print("PL: " .. msg .. ":", ...);
+   if 0 < _G.select("#", ...) then
+      print("PL: " .. msg .. ":", ...)
+   else
+      print("PL:", msg)
+   end
 end
 
 function logEvent(self, event, ...)
