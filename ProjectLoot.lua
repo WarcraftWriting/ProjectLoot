@@ -20,6 +20,9 @@ local GetLootSlotInfo = GetLootSlotInfo
 local GetLootSlotLink = GetLootSlotLink
 local GetMoney = GetMoney
 local GetNumLootItems = GetNumLootItems
+local Logout = Logout
+local Quit = Quit
+local RequestTimePlayed = RequestTimePlayed
 local SlashCmdList = SlashCmdList
 local UnitLevel = UnitLevel
 local UnitXP = UnitXP
@@ -60,18 +63,23 @@ function txPop()
    inTx = false
 end
 
-function trackPush(name, ...)
+function trackPush(self, name, ...)
    txPush()
    track(name, ...)
 end
 
-function trackPop(name, ...)
+function trackPop(self, name, ...)
    track(name, ...)
    txPop()
 end
 
 function track(name, ...)
    table.insert(events, {time(), name, txStatus(), unpack({...})})
+end
+
+function logThenTrack(self, event, ...)
+   log(event, ...)
+   track(event, ...)
 end
 
 function log(msg, ...)
@@ -88,6 +96,17 @@ end
 
 function itemIdFromLink(link)
    return tonumber(string.match(link, "item:(%d+)"))
+end
+
+function logThenHandle(handler)
+   return function (self, event, ...)
+      logEvent(self, event, ...)
+      handler(self, event, ...)
+   end
+end
+
+function eventDispatch(self, event, ...)
+   handlers[event](self, event, ...)
 end
 
 function lootSlotOpened(self, event, ...)
@@ -107,68 +126,94 @@ function lootSlotOpened(self, event, ...)
 end
 
 function lootSlotCleared(self, event, slot)
-   local time = time();
-
-   log("looted", time, loot[slot]);
+   track(event, loot[slot])
 end
 
-function logThenHandle(handler)
-   return function (self, event, ...)
-      logEvent(self, event, ...);
-      handler(self, event, ...);
-   end
+function trackSnapshot(event, callback)
+   trackSnapshotCore()
+   snapshotFrame:SetScript("OnEvent", snapshotEventHandler(event, function ()
+      snapshotFrame:UnregisterAllEvents()
+      if callback then callback() end
+   end))
+   snapshotFrame:RegisterEvent("TIME_PLAYED_MSG")
+   RequestTimePlayed()
 end
 
-function playerSnapshot(eventName)
-   track(eventName, snapshot.copper, snapshot.level, snapshot.xp)
-end
-
-function playerLogin(self, event)
+function trackSnapshotCore()
    snapshot.copper = GetMoney()
    snapshot.xp = UnitXP("player")
    snapshot.level = UnitLevel("player")
-
-   playerSnapshot("PLAYER_LOGIN")
 end
 
-function flushEvents()
-   _G.projectLootEvents = events
+function snapshotEventHandler(event, callback)
+   return function (self, _, total)
+      snapshot.played = total
+      track(event, 
+            snapshot.copper, 
+            snapshot.level,
+            snapshot.xp,
+            snapshot.total)
+      if callback then callback() end
+   end
+end
+
+function playerLogin(self, event)
+   trackSnapshot(event)
 end
 
 function playerLogout(self, event)
-   playerSnapshot("PLAYER_LOGOUT");
+   trackSnapshotImmediate(event)
    flushEvents()
 end
 
-function playerMoney(self, event)
-   local copper = GetMoney();
+function flushEvents()
+   log("flushing!")
+   _G.projectLootEvents = events
+end
 
-   track("COPPER_CHANGE", copper - snapshot.copper);
+-- Designed to be called when the player logs out without using the /pl logout
+-- or /pl quit command. When this happens, there isn't time to get a played
+-- time update, so we replace the value with -1.
+function trackSnapshotImmediate(event)
+   trackSnapshotCore()
+   track(event, snapshot.copper, snapshot.level, snapshot.xp, -1)
+end
+
+function playerMoney(self, event)
+   local copper = GetMoney()
+
+   logThenTrack(self, event, copper - snapshot.copper)
    -- in the event of a monetary reward from a quest, this event tends to fire
-   -- *after* the QUEST_FINISHED event.
-   snapshot.copper = copper;
+   -- _after_ the QUEST_FINISHED event. Same goes for taxirides, it fires
+   -- _after_ TAXIMAP_CLOSED.
+   snapshot.copper = copper
 end
 
 function playerLevelUp(self, event, level, ...)
    snapshot.level = level
-
-   track("LEVEL_UP", level);
-end
-
-function playerDead(self, event)
-   track("PLAYER_DEAD");
+   log("Sign out and get a screenshot from the armory?")
+   track(event, level)
 end
 
 function playerXpUpdate(self, event, unitId)
    if "player" == unitId then
-      snapshot.xp = UnitXP(unitId)
-   else
-      log("playerXpUpdate for", unitId)
+      local xp = UnitXP(unitId)
+
+      logThenTrack(self, event, xp - snapshot.xp)
+      snapshot.xp = xp
    end
 end
 
-function eventDispatch(self, event, ...)
-   handlers[event](self, event, ...);
+function itemLocked(self, event, bag, slot)
+   local _, qty, locked, _, _, lootable, itemLink = GetContainerItemInfo(bag, slot)
+
+   track(event, bag, slot, itemIdFromLink(itemLink))
+end
+
+function itemLockChanged(self, event, bag, slot)
+   local _, qty, locked, _, _, lootable, itemLink = GetContainerItemInfo(bag, slot)
+
+   track(event, bag, slot, itemIdFromLink(itemLink), locked)
 end
 
 function addonLoaded(self, event, addonName)
@@ -183,85 +228,47 @@ function addonLoaded(self, event, addonName)
    end
 end
 
-function questComplete(self, event)
-   trackPush("QUEST_COMPLETE")
-end
-
-function questFinished(self, event)
-   trackPop("QUEST_FINISHED")
-end
-
-function merchantShow(self, event, ...)
-   trackPush("MERCHANT_SHOW")
-end
-
-function merchantClosed(self, event, ...)
-   trackPop("MERCHANT_CLOSED")
-end
-
-function trainerShow(self, event)
-   trackPush("TRAINER_SHOW")
-end
-
-function trainerClosed(self, event)
-   trackPop("TRAINER_CLOSED")
-end
-
-function learnedSpellInTab(self, event, spellId, tabNumber)
-   track("TRAINED", spellId)
-end
-
-function instanceLockStop(self, event)
-   track("INSTANCE_LOCK_STOP", "Presumably, you've just quit the game..?")
-end
-
-function itemLocked(self, event, bag, slot)
-   local _, qty, locked, _, _, lootable, itemLink = GetContainerItemInfo(bag, slot)
-
-   track("ITEM_LOCKED", bag, slot, itemIdFromLink(itemLink))
-end
-
-function itemLockChanged(self, event, bag, slot)
-   local _, qty, locked, _, _, lootable, itemLink = GetContainerItemInfo(bag, slot)
-
-   track("ITEM_LOCK_CHANGED", bag, slot, itemIdFromLink(itemLink), locked)
-end
-
 
 handlers = {
-   -- ["CHAT_MSG_MONEY"] = LogEvent, -- an actual string message
+   -- DELETE_ITEM_CONFIRM
    ["ADDON_LOADED"] = addonLoaded,
+   ["BANKFRAME_CLOSED"] = handleDoubleClose(trackPop),
+   ["BANKFRAME_OPENED"] = logThenHandle(trackPush),
+   ["GOSSIP_CLOSED"] = handleDoubleClose(logThenHandle(trackPop)),
+   ["GOSSIP_CONFIRM"] = logThenTrack,
+   ["GOSSIP_SHOW"] = logThenHandle(trackPush),
+   ["ITEM_LOCK_CHANGED"] = logThenHandle(itemLockChanged),
+   ["ITEM_LOCKED"] = logThenHandle(itemLocked),
    ["ITEM_PUSH"] = logEvent, -- doesn't fire on anything too useful?
+   ["LEARNED_SPELL_IN_TAB"] = logThenTrack,
    ["LOOT_OPENED"] = logThenHandle(lootSlotOpened),
+   ["LOOT_SLOT_CHANGED"] = logEvent, -- is this ever useful? need I rescan?
    ["LOOT_SLOT_CLEARED"] = logThenHandle(lootSlotCleared),
-   ["LOOT_SLOT_CHANGED"] = logEvent,
-   ["OPEN_MASTER_LOOT_LIST"] = logEvent,
-   ["PLAYER_DEAD"] = logThenHandle(playerDead),
+   ["MERCHANT_CLOSED"] = handleDoubleClose(logThenHandle(trackPop)),
+   ["MERCHANT_SHOW"] = logThenHandle(trackPush),
+   ["OPEN_MASTER_LOOT_LIST"] = logEvent, -- when I get to instances
+   ["PLAYER_CONTROL_LOST"] = logThenTrack,
+   ["PLAYER_DEAD"] = logThenTrack,
    ["PLAYER_LEVEL_UP"] = logThenHandle(playerLevelUp),
    ["PLAYER_LOGIN"] = playerLogin,
-   ["PLAYER_LOGOUT"] = playerLogout,
-   ["PLAYER_MONEY"] = logThenHandle(playerMoney),
-   ["PLAYER_XP_UPDATE"] = logThenHandle(playerXpUpdate),
-   ["UPDATE_MASTER_LOOT_LIST"] = logEvent,
-   --
-   --
-   --
-   ["LEARNED_SPELL_IN_TAB"] = logThenHandle(learnedSpellInTab),
-   ["MERCHANT_CLOSED"] = handleDoubleClose(logThenHandle(merchantClosed)),
-   ["MERCHANT_SHOW"] = logThenHandle(merchantShow),
-   ["QUEST_COMPLETE"] = logThenHandle(questComplete), -- this is the opening salvo for a quest
-   ["QUEST_FINISHED"] = logThenHandle(questFinished),
+   ["PLAYER_LOGOUT"] = logThenHandle(playerLogout),
+   ["PLAYER_MONEY"] = playerMoney,
+   ["PLAYER_XP_UPDATE"] = playerXpUpdate,
+   ["PLAYERBANKBAGSLOTS_CHANGED"] = logThenTrack,
+   ["QUEST_COMPLETE"] = logThenHandle(trackPush),
+   ["QUEST_FINISHED"] = logThenHandle(trackPop),
    ["QUEST_GREETING"] = logEvent, -- fired for givers with > 1 quest
-   -- TAXIMAP_OPENED
-   -- BANKFRAME_OPENED
-   ["TRAINER_CLOSED"] = handleDoubleClose(logThenHandle(trainerClosed)),
-   ["TRAINER_SHOW"] = logThenHandle(trainerShow),
-   -- TRADE_SKILL_SHOW
-   -- DELETE_ITEM_CONFIRM
-   ["INSTANCE_LOCK_STOP"] = logThenHandle(instanceLockStop),
-
-   ["ITEM_LOCKED"] = logThenHandle(itemLocked),
-   ["ITEM_LOCK_CHANGED"] = logThenHandle(itemLockChanged),
+   ["TAXIMAP_CLOSED"] = handleDoubleClose(logThenHandle(trackPop)),
+   -- TAXIMAP_OPENED is fired even if you know no flight paths connected to
+   -- the one you're at. There are two known possible issues for Project Loot
+   -- concerning this: We shouldn't count a taxi ride if there isn't a
+   -- PLAYER_LOSS_OF_CONTROL fired in the transaction, and also, _if_
+   -- TAXIMAP_CLOSED isn't called, then the txCount won't be decremented
+   -- correctly.
+   ["TAXIMAP_OPENED"] = logThenHandle(trackPush),
+   ["TRAINER_CLOSED"] = handleDoubleClose(logThenHandle(trackPop)),
+   ["TRAINER_SHOW"] = logThenHandle(trackPush),
+   ["UPDATE_MASTER_LOOT_LIST"] = logEvent, -- when I get to instances?
 };
 
 frame = CreateFrame("FRAME", "ProjectLootFrame")
@@ -270,26 +277,24 @@ for k, v in pairs(handlers) do
 end
 frame:SetScript("OnEvent", eventDispatch);
 
+snapshotFrame = CreateFrame("FRAME", "ProjectLootSnapshotFrame")
+
 SlashCmdList.PROJECT_LOOT = function (msg, editBox)
    if "" == msg then
       print("Available Project Loot commands:")
       print("    clear -- clears all current events")
+      print("    logout -- takes a sanpshot of xp, wealth, etc before logging out")
+      print("    quit -- takes a snapshot of xp, wealth, etc before quitting")
    elseif "clear" == msg then
       events = {}
       log("Events cleared.")
+   elseif "quit" == msg then
+      trackSnapshot("QUIT", Quit)
+   elseif "logout" == msg then
+      trackSnapshot("LOGOUT", Logout)
+   elseif "snapshot" == msg then
+      trackSnapshot("SLASH", function () print("Snapshotted"); end)
    else
       log("Unrecognized command", msg)
    end
 end
-
--- item sale:
--- merchant_open
--- item_locked
--- copper_change
--- merchant_closed
-
--- item purchase:
--- merchant_open
--- item_lock_changed (has item number of purchase)
--- copper_change
--- merchant_closed
