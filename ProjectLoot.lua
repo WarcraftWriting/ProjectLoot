@@ -20,16 +20,12 @@ local GetLootSlotLink = GetLootSlotLink
 local UnitLevel = UnitLevel
 local UnitXP = UnitXP
 
-local Stack = Stack
-
 setfenv(1, P)
 
 loot = {}
-stack = Stack.new()
+events = {}
 
 function track(name, ...)
-   local events = Stack.peek(stack)
-
    table.insert(events, {time(), name, unpack({...})})
 end
  
@@ -80,7 +76,7 @@ function playerLogin(self, event)
 end
 
 function flushEvents()
-   _G.projectLootEvents = Stack.pop(stack) -- this should always == stack[1]
+   _G.projectLootEvents = events
 end
 
 function playerLogout(self, event)
@@ -115,34 +111,30 @@ function addonLoaded(self, event, addonName)
       else
          events = _G.projectLootEvents
       end
-      Stack.push(stack, events)
+      events = {}
    end
 end
 
 function questComplete(self, event)
    print("TODO")
-   --Stack.push(stack, {})
 end
 
 function questFinished(self, event)
    print("TODO")
-   --track("QUEST_FINISHED", Stack.pop(stack))
 end
 
 function merchantShow(self, event, ...)
-   Stack.push(stack, {})
+   track("MERCHANT_SHOW")
 end
 
+-- the MERCHANT_CLOSED event fires twice for whatever reason
 merchantClosedCount = 0
-
 function merchantClosed(self, event, ...)
    if 0 < merchantClosedCount then
       merchantClosedCount = 0
    else
-      local s = Stack.pop(stack)
-
       merchantClosedCount = merchantClosedCount + 1
-      track("MERCHANT_CLOSED", s)
+      track("MERCHANT_CLOSED")
    end
 end
 
@@ -174,7 +166,6 @@ handlers = {
    -- TRAINER_SHOW
    -- TRADE_SKILL_SHOW
    -- DELETE_ITEM_CONFIRM
-   -- MERCHANT_SHOW -- wowwiki misc events page
 };
 
 frame = CreateFrame("FRAME", "ProjectLootFrame")
