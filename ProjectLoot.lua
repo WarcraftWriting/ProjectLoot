@@ -10,13 +10,15 @@ local print = print
 local string = string
 local table = table
 local time = time
+local tonumber = tonumber
 local unpack = unpack
 
 local CreateFrame = CreateFrame
-local GetMoney = GetMoney
-local GetNumLootItems = GetNumLootItems
+local GetContainerItemInfo = GetContainerItemInfo
 local GetLootSlotInfo = GetLootSlotInfo
 local GetLootSlotLink = GetLootSlotLink
+local GetMoney = GetMoney
+local GetNumLootItems = GetNumLootItems
 local UnitLevel = UnitLevel
 local UnitXP = UnitXP
 
@@ -24,17 +26,62 @@ setfenv(1, P)
 
 loot = {}
 events = {}
+txCount = 0
+inTx = false
+snapshot = {}
+
+-- Some events, notably MERCHANT_CLOSED and TRAINER_CLOSED fire twice for some
+-- reason.
+function handleDoubleClose(handler)
+   local closedCount = 0
+
+   return function (self, event, ...)
+      if 0 < closedCount then
+         closedCount = 0
+      else
+         closedCount = closedCount + 1
+         handler(self, event, ...)
+      end
+   end
+end
+
+function txStatus()
+   if inTx then return txCount else return 0 end
+end
+
+function txPush()
+   txCount = txCount + 1
+   inTx = true
+end
+
+function txPop()
+   inTx = false
+end
+
+function trackPush(name, ...)
+   txPush()
+   track(name, ...)
+end
+
+function trackPop(name, ...)
+   track(name, ...)
+   txPop()
+end
 
 function track(name, ...)
-   table.insert(events, {time(), name, unpack({...})})
+   table.insert(events, {time(), name, txStatus(), unpack({...})})
 end
- 
+
 function log(msg, ...)
    print("PL: " .. msg .. ":", ...);
 end
 
 function logEvent(self, event, ...)
    log("(" .. event .. ")", ...);
+end
+
+function itemIdFromLink(link)
+   return tonumber(string.match(link, "item:(%d+)"))
 end
 
 function lootSlotOpened(self, event, ...)
@@ -44,7 +91,7 @@ function lootSlotOpened(self, event, ...)
       link = GetLootSlotLink(slot);
 
       if link then
-         itemId = string.match(link, "item:(%d+)");
+         itemId = itemIdFromLink(link)
          loot[slot] = itemId;
       else
          icon, name, qty, rarity, locked = GetLootSlotInfo(slot);
@@ -67,12 +114,15 @@ function logThenHandle(handler)
 end
 
 function playerSnapshot(eventName)
-   track(eventName, GetMoney(), UnitLevel("player"), UnitXP("player"))
+   track(eventName, snapshot.copper, snapshot.level, snapshot.xp)
 end
 
 function playerLogin(self, event)
-   copper = GetMoney();
-   playerSnapshot("PLAYER_LOGIN");
+   snapshot.copper = GetMoney()
+   snapshot.xp = UnitXP("player")
+   snapshot.level = UnitLevel("player")
+
+   playerSnapshot("PLAYER_LOGIN")
 end
 
 function flushEvents()
@@ -85,18 +135,30 @@ function playerLogout(self, event)
 end
 
 function playerMoney(self, event)
-   local copperNow = GetMoney();
+   local copper = GetMoney();
 
-   track("COPPER_CHANGE", copperNow - copper);
-   copper = copperNow;
+   track("COPPER_CHANGE", copper - snapshot.copper);
+   -- in the event of a monetary reward from a quest, this event tends to fire
+   -- *after* the QUEST_FINISHED event.
+   snapshot.copper = copper;
 end
 
 function playerLevelUp(self, event, level, ...)
+   snapshot.level = level
+
    track("LEVEL_UP", level);
 end
 
 function playerDead(self, event)
    track("PLAYER_DEAD");
+end
+
+function playerXpUpdate(self, event, unitId)
+   if "player" == unitId then
+      snapshot.xp = UnitXP(unitId)
+   else
+      log("playerXpUpdate for", unitId)
+   end
 end
 
 function eventDispatch(self, event, ...)
@@ -111,31 +173,52 @@ function addonLoaded(self, event, addonName)
       else
          events = _G.projectLootEvents
       end
-      events = {}
+      print("Project Loot Loaded! Go get 'em Tiger!")
    end
 end
 
 function questComplete(self, event)
-   print("TODO")
+   trackPush("QUEST_COMPLETE")
 end
 
 function questFinished(self, event)
-   print("TODO")
+   trackPop("QUEST_FINISHED")
 end
 
 function merchantShow(self, event, ...)
-   track("MERCHANT_SHOW")
+   trackPush("MERCHANT_SHOW")
 end
 
--- the MERCHANT_CLOSED event fires twice for whatever reason
-merchantClosedCount = 0
 function merchantClosed(self, event, ...)
-   if 0 < merchantClosedCount then
-      merchantClosedCount = 0
-   else
-      merchantClosedCount = merchantClosedCount + 1
-      track("MERCHANT_CLOSED")
-   end
+   trackPop("MERCHANT_CLOSED")
+end
+
+function trainerShow(self, event)
+   trackPush("TRAINER_SHOW")
+end
+
+function trainerClosed(self, event)
+   trackPop("TRAINER_CLOSED")
+end
+
+function learnedSpellInTab(self, event, spellId, tabNumber)
+   track("TRAINED", spellId)
+end
+
+function instanceLockStop(self, event)
+   track("INSTANCE_LOCK_STOP", "Presumably, you've just quit the game..?")
+end
+
+function itemLocked(self, event, bag, slot)
+   local _, qty, locked, _, _, lootable, itemLink = GetContainerItemInfo(bag, slot)
+
+   track("ITEM_LOCKED", bag, slot, itemIdFromLink(itemLink))
+end
+
+function itemLockChanged(self, event, bag, slot)
+   local _, qty, locked, _, _, lootable, itemLink = GetContainerItemInfo(bag, slot)
+
+   track("ITEM_LOCK_CHANGED", bag, slot, itemIdFromLink(itemLink), locked)
 end
 
 
@@ -147,25 +230,32 @@ handlers = {
    ["LOOT_SLOT_CLEARED"] = logThenHandle(lootSlotCleared),
    ["LOOT_SLOT_CHANGED"] = logEvent,
    ["OPEN_MASTER_LOOT_LIST"] = logEvent,
-   ["PLAYER_DEAD"] = playerDead,
-   ["PLAYER_LEVEL_UP"] = playerLevelUp,
+   ["PLAYER_DEAD"] = logThenHandle(playerDead),
+   ["PLAYER_LEVEL_UP"] = logThenHandle(playerLevelUp),
    ["PLAYER_LOGIN"] = playerLogin,
    ["PLAYER_LOGOUT"] = playerLogout,
-   ["PLAYER_MONEY"] = playerMoney,
+   ["PLAYER_MONEY"] = logThenHandle(playerMoney),
+   ["PLAYER_XP_UPDATE"] = logThenHandle(playerXpUpdate),
    ["UPDATE_MASTER_LOOT_LIST"] = logEvent,
    --
    --
    --
-   ["MERCHANT_CLOSED"] = logThenHandle(merchantClosed), -- fires twice
+   ["LEARNED_SPELL_IN_TAB"] = logThenHandle(learnedSpellInTab),
+   ["MERCHANT_CLOSED"] = handleDoubleClose(logThenHandle(merchantClosed)),
    ["MERCHANT_SHOW"] = logThenHandle(merchantShow),
    ["QUEST_COMPLETE"] = logThenHandle(questComplete), -- this is the opening salvo for a quest
    ["QUEST_FINISHED"] = logThenHandle(questFinished),
    ["QUEST_GREETING"] = logEvent, -- fired for givers with > 1 quest
    -- TAXIMAP_OPENED
    -- BANKFRAME_OPENED
-   -- TRAINER_SHOW
+   ["TRAINER_CLOSED"] = handleDoubleClose(logThenHandle(trainerClosed)),
+   ["TRAINER_SHOW"] = logThenHandle(trainerShow),
    -- TRADE_SKILL_SHOW
    -- DELETE_ITEM_CONFIRM
+   ["INSTANCE_LOCK_STOP"] = logThenHandle(instanceLockStop),
+
+   ["ITEM_LOCKED"] = logThenHandle(itemLocked),
+   ["ITEM_LOCK_CHANGED"] = logThenHandle(itemLockChanged),
 };
 
 frame = CreateFrame("FRAME", "ProjectLootFrame")
@@ -173,3 +263,16 @@ for k, v in pairs(handlers) do
    frame:RegisterEvent(k);
 end
 frame:SetScript("OnEvent", eventDispatch);
+
+
+-- item sale:
+-- merchant_open
+-- item_locked
+-- copper_change
+-- merchant_closed
+
+-- item purchase:
+-- merchant_open
+-- item_lock_changed (has item number of purchase)
+-- copper_change
+-- merchant_closed
