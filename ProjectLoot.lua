@@ -16,6 +16,7 @@ local unpack = unpack
 
 local CreateFrame = CreateFrame
 local GetContainerItemInfo = GetContainerItemInfo
+local GetCVar = GetCVar
 local GetLootSlotInfo = GetLootSlotInfo
 local GetLootSlotLink = GetLootSlotLink
 local GetMoney = GetMoney
@@ -23,9 +24,15 @@ local GetNumLootItems = GetNumLootItems
 local Logout = Logout
 local Quit = Quit
 local RequestTimePlayed = RequestTimePlayed
+local Screenshot = Screenshot
+local SetCVar = SetCVar
+local SetView = SetView
 local SlashCmdList = SlashCmdList
+local UIParent = UIParent
 local UnitLevel = UnitLevel
 local UnitXP = UnitXP
+
+local timer = projectLootTimer
 
 setfenv(1, P)
 
@@ -189,8 +196,66 @@ function playerMoney(self, event)
    snapshot.copper = copper
 end
 
+function takeScreenshot()
+   local alpha = UIParent:GetAlpha()
+   local format = GetCVar("screenshotFormat")
+   local quality = GetCVar("screenshotQuality")
+   local frame = CreateFrame("FRAME", "ProjectLootScreenshotFrame")
+
+   log("Say cheese!")
+   frame:RegisterEvent("SCREENSHOT_FAILED")
+   frame:RegisterEvent("SCREENSHOT_SUCCEEDED")
+   frame:SetScript("OnEvent", function (self, event)
+      _G.FlipCameraYaw(180)
+      SetView(1)                      
+      UIParent:Show()
+      SetCVar("screenshotFormat", format)
+      SetCVar("screenshotQuality", quality)
+   end)
+
+   UIParent:Hide()
+   -- TODO: these don't seem to have any effect?
+   SetCVar("screenshotFormat", "jpg")
+   SetCVar("screenshotQuality", 10)
+   poseForScreenshot()
+end
+
+-- TODO: this could be a LOT cleaner!
+function poseForScreenshot()
+   local stepTimer = 1.5
+   local rotateTimer = 0.5
+   local rotateSpeed = 0.02
+   local zoomTimer = 1
+   local five = function (elapsed)
+      _G.MoveViewRightStop()
+      Screenshot()
+   end
+   local four = function (elapsed)
+      _G.MoveViewRightStart(rotateSpeed)         
+      timer.create(rotateTimer, five)
+   end
+   local three = function (elapsed)
+      _G.CameraZoomOut(5)
+      timer.create(zoomTimer, four)
+   end
+   local two = function (elapsed)
+      _G.FlipCameraYaw(180)
+      _G.CameraZoomIn(50)
+      timer.create(zoomTimer, three)
+   end
+   local one = function ()
+      _G.ResetView(5)
+      _G.SetView(5)
+      timer.create(stepTimer, two)
+   end
+
+   -- TODO disable mouse look
+   one()
+end
+
 function playerLevelUp(self, event, level, ...)
    snapshot.level = level
+   takeScreenshot()
    log("Sign out and get a screenshot from the armory?")
    track(event, level)
 end
@@ -294,6 +359,8 @@ SlashCmdList.PROJECT_LOOT = function (msg, editBox)
       trackSnapshot("LOGOUT", Logout)
    elseif "snapshot" == msg then
       trackSnapshot("SLASH", function () print("Snapshotted"); end)
+   elseif "ss" == msg or "screenshot" == msg then
+      takeScreenshot()
    else
       log("Unrecognized command", msg)
    end

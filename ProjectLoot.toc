@@ -7,4 +7,6 @@
 ## DefaultState: Enabled
 ## LoadOnDemand: 0
 
+Timer.lua
+
 ProjectLoot.lua
